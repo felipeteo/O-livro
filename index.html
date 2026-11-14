@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5eee4">
+  <title>O nosso livro</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <section class="login-screen" id="login-screen" aria-labelledby="login-title" hidden>
+    <form class="login-card" id="login-form">
+      <button class="close-button" id="close-login" type="button" aria-label="Fechar">×</button>
+      <span class="login-heart" aria-hidden="true">♡</span>
+      <p class="eyebrow">MODO DE EDIÇÃO</p>
+      <h1 id="login-title">Editar nosso livro.</h1>
+      <p class="login-copy">Entre para adicionar lembranças ou remover fotos. A leitura continua aberta para todos.</p>
+      <label class="field-label" for="login-user">Login</label>
+      <input id="login-user" name="username" type="text" autocomplete="username" required>
+      <label class="field-label" for="login-password">Senha</label>
+      <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+      <p class="login-error" id="login-error" role="alert"></p>
+      <button class="save-button" type="submit">Entrar para editar <span aria-hidden="true">♡</span></button>
+      <p class="login-note">O acesso de edição é uma trava local neste navegador.</p>
+    </form>
+  </section>
+
+  <main class="app-shell" id="app-shell">
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="O nosso livro, início">
+        <span class="brand-mark" aria-hidden="true">♡</span>
+        <span>O nosso livro</span>
+      </a>
+      <div class="topbar-actions">
+        <button class="edit-button" id="edit-login" type="button">Editar livro</button>
+        <button class="add-button" id="open-form" type="button" hidden>
+          <span aria-hidden="true">＋</span> Adicionar lembrança
+        </button>
+        <button class="logout-button" id="logout" type="button" hidden>Sair da edição</button>
+      </div>
+    </header>
+
+    <section class="intro" aria-labelledby="book-title">
+      <p class="eyebrow"><span class="eyebrow-line"></span> FEITO DE MOMENTOS, FEITO DE NÓS</p>
+      <h1 id="book-title">Uma história que<br><em>é só nossa.</em></h1>
+      <p class="intro-copy">Cada página guarda um pedacinho do caminho que percorremos juntos.</p>
+    </section>
+
+    <section class="book-stage" aria-label="Livro de lembranças">
+      <div class="book-shadow" aria-hidden="true"></div>
+      <div class="book" id="book">
+        <article class="back-cover" id="back-cover" aria-label="Contracapa">
+          <span class="back-cover-spine" aria-hidden="true"></span>
+          <span class="back-cover-frame" aria-hidden="true"></span>
+          <span class="back-cover-content">
+            <span class="back-cover-heart" aria-hidden="true">♡</span>
+            <span class="back-cover-kicker">E AGORA, O PRÓXIMO CAPÍTULO...</span>
+            <span class="back-cover-title">A nossa história<br>ainda está só começando.</span>
+            <span class="back-cover-rule" aria-hidden="true"></span>
+            <span class="back-cover-note">Que a vida nos reserve muitos caminhos,<br>risadas e lembranças para guardar.<br><em>Com amor, hoje e sempre.</em></span>
+            <button class="back-cover-button" id="restart-book" type="button">Ler de novo <span aria-hidden="true">↺</span></button>
+          </span>
+        </article>
+        <div class="book-spine" aria-hidden="true"></div>
+        <article class="book-page left-page" id="left-page" aria-label="Página anterior"></article>
+        <article class="book-page right-page" id="right-page" aria-live="polite"></article>
+        <div class="page-turn" id="page-turn" aria-hidden="true">
+          <div class="turn-front"></div>
+          <div class="turn-back"></div>
+        </div>
+        <div class="page-edge" aria-hidden="true"></div>
+      </div>
+    </section>
+
+    <nav class="book-controls" aria-label="Navegação do livro">
+      <button class="nav-button" id="previous" type="button" aria-label="Voltar página">
+        <span aria-hidden="true">←</span>
+      </button>
+      <span class="page-counter" id="page-counter">Capa</span>
+      <button class="nav-button" id="next" type="button" aria-label="Avançar página">
+        <span aria-hidden="true">→</span>
+      </button>
+    </nav>
+    <p class="turn-hint"><span aria-hidden="true">✦</span> Use as setas para folhear as lembranças</p>
+    <p class="storage-note">Suas lembranças ficam salvas neste navegador, neste dispositivo.</p>
+  </main>
+
+  <dialog class="memory-dialog" id="memory-dialog" aria-labelledby="dialog-title">
+    <form class="memory-form" id="memory-form">
+      <button class="close-button" id="close-form" type="button" aria-label="Fechar">×</button>
+      <p class="eyebrow">UM NOVO PEDACINHO DA HISTÓRIA</p>
+      <h2 id="dialog-title">Guardar lembrança</h2>
+      <label class="field-label" for="memory-title">Dê um nome a este momento</label>
+      <input id="memory-title" name="title" type="text" placeholder="Aquele nosso primeiro encontro..." required>
+      <label class="field-label" for="memory-date">Quando aconteceu?</label>
+      <input id="memory-date" name="date" type="date">
+      <label class="field-label" for="memory-photo">Adicione uma foto <span>(opcional)</span></label>
+      <label class="upload-area" for="memory-photo">
+        <span class="upload-icon" aria-hidden="true">＋</span>
+        <span id="upload-label">Escolher uma foto</span>
+        <span class="upload-caption">JPG, PNG ou WEBP</span>
+      </label>
+      <input class="visually-hidden" id="memory-photo" name="photo" type="file" accept="image/*">
+      <p class="storage-info" id="storage-info" role="status">Consultando o espaço disponível...</p>
+      <label class="field-label" for="memory-caption">Escreva um texto para a foto <span>(opcional)</span></label>
+      <textarea id="memory-caption" name="caption" rows="2" placeholder="Uma legenda ou frase especial para esta foto..."></textarea>
+      <label class="field-label" for="memory-text">Conte a história deste momento</label>
+      <textarea id="memory-text" name="text" rows="4" placeholder="O que você lembra desse dia? O que gostaria de dizer a ela?" required></textarea>
+      <div class="form-error" id="form-error" role="alert"></div>
+      <button class="save-button" type="submit">Guardar no livro <span aria-hidden="true">♡</span></button>
+    </form>
+  </dialog>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

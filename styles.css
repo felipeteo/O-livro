@@ -75,7 +75,7 @@ button { color: inherit; }
 .logout-button:hover { color: var(--rose-dark); }
 .edit-button { padding: 9px 14px; border: 1px solid #dfd3c7; border-radius: 999px; color: #71665d; background: rgba(255,255,255,.55); font-size: 11px; cursor: pointer; transition: border-color .2s, background .2s; }
 .edit-button:hover { border-color: var(--rose); background: white; }
-.app-shell.is-editor .edit-button { display: none; }
+.app-shell.is-editor #edit-login { display: none; }
 
 .brand {
   display: inline-flex;
@@ -360,6 +360,10 @@ h1 em { color: var(--rose); font-weight: 400; }
 .turn-hint { margin: 11px 0 0; }
 .turn-hint span { margin-right: 4px; color: #bd8f81; }
 .storage-note { margin: 20px 0 0; color: #a4998e; }
+.sync-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; margin: 16px auto 0; }
+.sync-tools[hidden] { display: none; }
+.sync-status { flex: 1 1 100%; margin: 0; color: #817569; font-size: 11px; line-height: 1.5; text-align: center; }
+.sync-tools .edit-button:disabled { opacity: .5; cursor: not-allowed; }
 
 .memory-dialog {
   width: min(490px, calc(100% - 32px));
@@ -444,6 +448,8 @@ h1 em { color: var(--rose); font-weight: 400; }
   .memory-form { padding: 28px 22px 24px; }
   .login-card { padding: 34px 24px 24px; }
   .storage-note { margin-top: 15px; }
+  .sync-tools { gap: 7px; }
+  .sync-status { font-size: 10px; }
 }
 
 @media (max-width: 380px) {

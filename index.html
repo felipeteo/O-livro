@@ -9,6 +9,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
+  <script src="supabase-config.js" defer></script>
+  <script src="photo-manifest.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -86,7 +88,11 @@
       </button>
     </nav>
     <p class="turn-hint"><span aria-hidden="true">✦</span> Use as setas para folhear as lembranças</p>
-    <p class="storage-note">Suas lembranças ficam salvas neste navegador, neste dispositivo.</p>
+    <p class="storage-note" id="public-sync-status" role="status">As fotos do álbum do projeto serão exibidas aqui. Configure o Supabase para compartilhar novas lembranças entre dispositivos.</p>
+    <section class="sync-tools" id="sync-tools" hidden aria-label="Sincronização de lembranças">
+      <p class="sync-status" id="sync-status" role="status">Conectando ao álbum online...</p>
+      <button class="edit-button" id="import-local" type="button" disabled>Importar lembranças deste dispositivo</button>
+    </section>
   </main>
 
   <dialog class="memory-dialog" id="memory-dialog" aria-labelledby="dialog-title">

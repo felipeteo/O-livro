@@ -7,6 +7,12 @@ const MAX_PHOTO_DIMENSION = 1600;
 const LOGIN_USER = "b+f";
 const LOGIN_PASSWORD = "2015";
 const LOGIN_SESSION_KEY = "nosso-livro-authenticated";
+const CLOUD_SESSION_KEY = "nosso-livro-supabase-session";
+const supabaseConfig = window.BOOK_SUPABASE ?? {};
+const supabaseUrl = String(supabaseConfig.url ?? "").replace(/\/+$/, "");
+const supabaseAnonKey = String(supabaseConfig.anonKey ?? "");
+const supabaseEditorEmail = String(supabaseConfig.editorEmail ?? "");
+const cloudEnabled = Boolean(supabaseUrl && supabaseAnonKey);
 
 const loginScreen = document.querySelector("#login-screen");
 const loginForm = document.querySelector("#login-form");
@@ -44,6 +50,9 @@ const uploadLabel = document.querySelector("#upload-label");
 const storageInfo = document.querySelector("#storage-info");
 const formError = document.querySelector("#form-error");
 const toast = document.querySelector("#toast");
+const syncTools = document.querySelector("#sync-tools");
+const syncStatus = document.querySelector("#sync-status");
+const importLocalButton = document.querySelector("#import-local");
 
 let database;
 let memories = [];
@@ -54,9 +63,13 @@ let preparedPhoto = "";
 let photoPreparation = Promise.resolve(true);
 let appStarted = false;
 let isEditor = false;
+let cloudSession;
 
 try {
-  isEditor = sessionStorage.getItem(LOGIN_SESSION_KEY) === "true";
+  cloudSession = JSON.parse(sessionStorage.getItem(CLOUD_SESSION_KEY) || "null");
+  isEditor = cloudEnabled
+    ? Boolean(cloudSession?.access_token)
+    : sessionStorage.getItem(LOGIN_SESSION_KEY) === "true";
 } catch (error) {
   console.warn("Não foi possível consultar a sessão de edição:", error);
 }
@@ -100,7 +113,7 @@ function readMemories() {
   });
 }
 
-function saveMemory(memory) {
+function saveLocalMemory(memory) {
   return new Promise((resolve, reject) => {
     if (!database) {
       reject(new Error("O banco de dados não está disponível. Atualize a página para tentar novamente."));
@@ -112,6 +125,201 @@ function saveMemory(memory) {
     transaction.onerror = () => reject(transaction.error ?? new Error("Não foi possível guardar a lembrança."));
     transaction.onabort = () => reject(transaction.error ?? new Error("O armazenamento foi interrompido."));
   });
+}
+
+function isConfiguredSupabase() {
+  return cloudEnabled && !supabaseUrl.includes("SEU-PROJETO") && !supabaseAnonKey.includes("SUA_CHAVE");
+}
+
+function publicPhotoUrl(path) {
+  return `${supabaseUrl}/storage/v1/object/public/book-photos/${path.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+async function getCloudSession() {
+  if (!cloudSession?.access_token) throw new Error("Entre no modo de edição para continuar.");
+  if (cloudSession.expires_at && Date.now() < (cloudSession.expires_at - 60) * 1000) {
+    return cloudSession.access_token;
+  }
+  if (!cloudSession.refresh_token) {
+    cloudSession = undefined;
+    throw new Error("Sua sessão de edição expirou. Entre novamente.");
+  }
+
+  const response = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=refresh_token`, {
+    method: "POST",
+    headers: { apikey: supabaseAnonKey, "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh_token: cloudSession.refresh_token })
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    cloudSession = undefined;
+    sessionStorage.removeItem(CLOUD_SESSION_KEY);
+    throw new Error(result.msg || result.message || "A sessão expirou. Entre novamente.");
+  }
+  cloudSession = {
+    ...result,
+    expires_at: Math.floor(Date.now() / 1000) + result.expires_in
+  };
+  sessionStorage.setItem(CLOUD_SESSION_KEY, JSON.stringify(cloudSession));
+  return cloudSession.access_token;
+}
+
+async function supabaseRequest(path, options = {}) {
+  if (!isConfiguredSupabase()) {
+    throw new Error("O Supabase ainda não foi configurado. Preencha supabase-config.js e publique o site novamente.");
+  }
+  const accessToken = options.authenticated ? await getCloudSession() : supabaseAnonKey;
+  const headers = {
+    apikey: supabaseAnonKey,
+    Authorization: `Bearer ${accessToken}`,
+    ...options.headers
+  };
+  if (options.body && !(options.body instanceof Blob)) {
+    headers["Content-Type"] = "application/json";
+  }
+  const response = await fetch(`${supabaseUrl}${path}`, {
+    method: options.method ?? "GET",
+    headers,
+    body: options.body instanceof Blob ? options.body : options.body ? JSON.stringify(options.body) : undefined
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    let message = body;
+    try {
+      const error = JSON.parse(body);
+      message = error.message || error.msg || error.error_description || error.error || body;
+    } catch {
+      // Keep the response body as the diagnostic when the server does not return JSON.
+    }
+    throw new Error(`Supabase (${response.status}): ${message || response.statusText}`);
+  }
+  if (response.status === 204) return null;
+  const body = await response.text();
+  return body ? JSON.parse(body) : null;
+}
+
+async function readCloudMemories() {
+  const rows = await supabaseRequest("/rest/v1/memories?select=id,title,date,caption,text,photo_path&order=date.asc.nullslast,created_at.asc");
+  return rows.map((row) => ({
+    ...row,
+    caption: row.caption ?? "",
+    text: row.text ?? "",
+    photo: row.photo_path ? publicPhotoUrl(row.photo_path) : ""
+  }));
+}
+
+async function uploadCloudPhoto(memoryId, photo) {
+  const blob = await (await fetch(photo)).blob();
+  if (blob.type !== "image/webp") {
+    throw new Error("A foto preparada não está no formato WebP esperado. Escolha-a novamente.");
+  }
+  if (blob.size > MAX_CLOUD_PHOTO_SIZE) {
+    throw new Error("A foto otimizada ainda ultrapassa o limite online de 10 MB. Escolha uma imagem menor.");
+  }
+  const path = `${memoryId}.webp`;
+  await supabaseRequest(`/storage/v1/object/book-photos/${encodeURIComponent(path)}`, {
+    method: "POST",
+    authenticated: true,
+    headers: { "Content-Type": "image/webp", "x-upsert": "true" },
+    body: blob
+  });
+  return path;
+}
+
+async function deleteCloudPhoto(path) {
+  if (!path) return;
+  await supabaseRequest("/storage/v1/object/book-photos", {
+    method: "DELETE",
+    authenticated: true,
+    headers: { "Content-Type": "application/json" },
+    body: { prefixes: [path] }
+  });
+}
+
+async function saveMemory(memory) {
+  let photoPath = memory.photo_path || null;
+  let uploadedPath = "";
+  if (memory.photo?.startsWith("data:image/")) {
+    uploadedPath = await uploadCloudPhoto(memory.id, memory.photo);
+    photoPath = uploadedPath;
+  } else if (!memory.photo) {
+    photoPath = null;
+  }
+
+  if (cloudEnabled) {
+    try {
+      await supabaseRequest("/rest/v1/memories?on_conflict=id", {
+        method: "POST",
+        authenticated: true,
+        headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: {
+          id: memory.id,
+          title: memory.title,
+          date: memory.date || null,
+          caption: memory.caption ?? "",
+          text: memory.text ?? "",
+          photo_path: photoPath
+        }
+      });
+    } catch (error) {
+      if (uploadedPath) {
+        try {
+          await deleteCloudPhoto(uploadedPath);
+        } catch (cleanupError) {
+          console.error("Não foi possível limpar a foto após falha ao salvar a lembrança:", cleanupError);
+        }
+      }
+      throw error;
+    }
+  }
+
+  const savedMemory = {
+    ...memory,
+    photo_path: photoPath,
+    photo: photoPath && memory.photo?.startsWith("data:image/")
+      ? publicPhotoUrl(photoPath)
+      : memory.photo
+  };
+  try {
+    await saveLocalMemory({ ...memory, photo_path: photoPath });
+  } catch (error) {
+    if (!cloudEnabled) throw error;
+    console.error("A lembrança foi sincronizada, mas não foi possível atualizar o cache local:", error);
+  }
+  return savedMemory;
+}
+
+function getBundledPhotoMemories() {
+  return (window.BOOK_PHOTOS ?? []).map((photo, index) => ({
+    id: `project-photo-${index + 1}`,
+    title: photo.title,
+    date: "",
+    caption: "",
+    text: "",
+    photo: new URL(`fotos/${encodeURIComponent(photo.file)}`, document.baseURI).href,
+    bundled: true
+  }));
+}
+
+async function signInEditor(username, password) {
+  if (username !== LOGIN_USER) {
+    throw new Error("Login incorreto.");
+  }
+  if (!cloudEnabled) {
+    if (password !== "2015") throw new Error("Login ou senha incorretos. Tente novamente.");
+    return null;
+  }
+  const result = await supabaseRequest("/auth/v1/token?grant_type=password", {
+    method: "POST",
+    headers: { apikey: supabaseAnonKey, "Content-Type": "application/json" },
+    body: { email: supabaseEditorEmail, password }
+  });
+  cloudSession = {
+    ...result,
+    expires_at: Math.floor(Date.now() / 1000) + result.expires_in
+  };
+  sessionStorage.setItem(CLOUD_SESSION_KEY, JSON.stringify(cloudSession));
+  return cloudSession;
 }
 
 function formatBytes(bytes) {
@@ -204,7 +412,7 @@ function renderMemory(memory, index) {
   const photo = memory.photo
     ? `<div class="memory-photo-wrap">
         <img class="memory-photo" src="${memory.photo}" alt="${escapeHtml(title)}">
-        ${isEditor ? `<button class="remove-photo" type="button" data-memory-id="${escapeHtml(memory.id)}" aria-label="Remover foto de ${escapeHtml(title)}">Remover foto</button>` : ""}
+        ${isEditor && !memory.bundled ? `<button class="remove-photo" type="button" data-memory-id="${escapeHtml(memory.id)}" aria-label="Remover foto de ${escapeHtml(title)}">Remover foto</button>` : ""}
       </div>`
     : `<div class="photo-placeholder" aria-hidden="true">♡</div>`;
 
@@ -274,18 +482,42 @@ function updateEditorControls() {
   document.querySelector("#open-form").hidden = !isEditor;
   document.querySelector("#logout").hidden = !isEditor;
   appShell.classList.toggle("is-editor", isEditor);
+  syncTools.hidden = !isEditor;
+  importLocalButton.disabled = !isEditor || !cloudEnabled;
+  if (isEditor && !cloudEnabled) {
+    syncStatus.textContent = "Supabase não configurado: novas lembranças ficam apenas neste navegador.";
+  } else if (isEditor) {
+    syncStatus.textContent = "Lembranças novas serão sincronizadas com o álbum online.";
+  }
   renderBook();
+}
+
+function sortMemories() {
+  memories.sort((a, b) => {
+    if (Boolean(a.bundled) !== Boolean(b.bundled)) return a.bundled ? 1 : -1;
+    return (a.date || "9999").localeCompare(b.date || "9999");
+  });
 }
 
 async function removePhoto(memoryId) {
   const memory = memories.find((item) => item.id === memoryId);
-  if (!isEditor || !memory?.photo) return;
+  if (!isEditor || memory?.bundled || !memory?.photo) return;
   if (!window.confirm(`Remover a foto de "${memory.title}"? O texto da lembrança será mantido.`)) return;
 
-  const updatedMemory = { ...memory, photo: "" };
+  const oldPhotoPath = memory.photo_path;
+  const updatedMemory = { ...memory, photo: "", photo_path: null };
   try {
     await saveMemory(updatedMemory);
     memories = memories.map((item) => item.id === memoryId ? updatedMemory : item);
+    if (oldPhotoPath && cloudEnabled) {
+      try {
+        await deleteCloudPhoto(oldPhotoPath);
+      } catch (error) {
+        console.error("A foto foi removida do livro, mas não do armazenamento:", error);
+        showToast("Foto removida do livro; não foi possível limpar o arquivo online.");
+        return;
+      }
+    }
     renderBook();
     showToast("Foto removida. O texto foi mantido.");
   } catch (error) {
@@ -356,7 +588,12 @@ function turnPage(direction) {
 
 document.querySelector("#open-form").addEventListener("click", () => {
   formError.textContent = "";
-  updateStorageInfo();
+  if (cloudEnabled) {
+    storageInfo.classList.remove("is-low");
+    storageInfo.textContent = "As fotos serão enviadas ao álbum online. Limite por foto: 10 MB.";
+  } else {
+    updateStorageInfo();
+  }
   dialog.showModal();
   document.querySelector("#memory-title").focus();
 });
@@ -373,6 +610,19 @@ document.querySelector("#close-login").addEventListener("click", () => {
 loginScreen.addEventListener("click", (event) => {
   if (event.target === loginScreen) loginScreen.hidden = true;
 });
+book.addEventListener("error", (event) => {
+  const image = event.target;
+  if (!(image instanceof HTMLImageElement) || !image.classList.contains("memory-photo")) return;
+
+  const photoWrap = image.closest(".memory-photo-wrap");
+  if (!photoWrap) return;
+
+  const placeholder = document.createElement("div");
+  placeholder.className = "photo-placeholder";
+  placeholder.setAttribute("aria-hidden", "true");
+  placeholder.textContent = "♡";
+  photoWrap.replaceWith(placeholder);
+}, true);
 rightPage.addEventListener("click", (event) => {
   const removeButton = event.target.closest(".remove-photo");
   if (removeButton) removePhoto(removeButton.dataset.memoryId);
@@ -391,11 +641,41 @@ document.querySelector("#logout").addEventListener("click", () => {
   isEditor = false;
   try {
     sessionStorage.removeItem(LOGIN_SESSION_KEY);
+    sessionStorage.removeItem(CLOUD_SESSION_KEY);
   } catch (error) {
     console.warn("Não foi possível limpar a sessão de edição:", error);
   }
   updateEditorControls();
   showToast("Modo de edição encerrado.");
+});
+
+importLocalButton.addEventListener("click", async () => {
+  if (!isEditor || !cloudEnabled) return;
+  importLocalButton.disabled = true;
+  syncStatus.textContent = "Lendo as lembranças salvas neste dispositivo...";
+  try {
+    const localMemories = await readMemories();
+    const pendingMemories = localMemories.filter((memory) => !memory.bundled);
+    let imported = 0;
+    for (const memory of pendingMemories) {
+      syncStatus.textContent = `Importando lembrança ${imported + 1} de ${pendingMemories.length}...`;
+      const savedMemory = await saveMemory(memory);
+      const existingIndex = memories.findIndex((item) => item.id === savedMemory.id);
+      if (existingIndex < 0) memories.push(savedMemory);
+      else memories[existingIndex] = savedMemory;
+      imported += 1;
+    }
+    sortMemories();
+    renderBook();
+    syncStatus.textContent = imported
+      ? `${imported} lembrança(s) deste dispositivo agora está(ão) no álbum online. Os dados locais foram mantidos.`
+      : "Não há lembranças locais para importar neste navegador.";
+  } catch (error) {
+    console.error("Erro ao importar lembranças locais:", error);
+    syncStatus.textContent = `Importação interrompida. ${error.message} As lembranças locais foram mantidas; tente novamente.`;
+  } finally {
+    importLocalButton.disabled = !cloudEnabled;
+  }
 });
 
 photoInput.addEventListener("change", () => {
@@ -415,7 +695,11 @@ photoInput.addEventListener("change", () => {
     if (photoInput.files?.[0] !== file) return false;
     preparedPhoto = photo;
     uploadLabel.textContent = `${file.name} — otimizada`;
-    await updateStorageInfo(photo.length * 2);
+    if (cloudEnabled) {
+      storageInfo.textContent = `Foto otimizada (${formatBytes(Math.ceil(photo.length * 3 / 4))}); será enviada ao álbum online.`;
+    } else {
+      await updateStorageInfo(photo.length * 2);
+    }
     return true;
   }).catch((error) => {
     console.error("Erro ao preparar foto:", error);
@@ -446,11 +730,13 @@ form.addEventListener("submit", async (event) => {
       return;
     }
     photo = preparedPhoto;
-    const estimatedPhotoBytes = photo.length * 2;
-    const estimate = await updateStorageInfo(estimatedPhotoBytes);
-    if (estimate && estimatedPhotoBytes + 64 * 1024 > estimate.available) {
-      formError.textContent = "O espaço disponível parece insuficiente para esta foto. Libere espaço no navegador e tente novamente.";
-      return;
+    if (!cloudEnabled) {
+      const estimatedPhotoBytes = photo.length * 2;
+      const estimate = await updateStorageInfo(estimatedPhotoBytes);
+      if (estimate && estimatedPhotoBytes + 64 * 1024 > estimate.available) {
+        formError.textContent = "O espaço disponível parece insuficiente para esta foto. Libere espaço no navegador e tente novamente.";
+        return;
+      }
     }
   }
 
@@ -468,18 +754,22 @@ form.addEventListener("submit", async (event) => {
   }
 
   try {
-    await saveMemory(memory);
-    memories.push(memory);
+    const savedMemory = await saveMemory(memory);
+    memories.push(savedMemory);
     memories.sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999"));
-    currentIndex = memories.indexOf(memory);
+    currentIndex = memories.indexOf(savedMemory);
     renderBook();
     dialog.close();
     form.reset();
     uploadLabel.textContent = "Escolher uma foto";
     preparedPhoto = "";
     photoPreparation = Promise.resolve(true);
-    showToast("Lembrança guardada no livro ♡");
-    updateStorageInfo();
+    showToast(cloudEnabled ? "Lembrança sincronizada no álbum online ♡" : "Lembrança guardada neste navegador ♡");
+    if (cloudEnabled) {
+      storageInfo.textContent = "Foto enviada ao álbum online.";
+    } else {
+      updateStorageInfo();
+    }
   } catch (error) {
     console.error("Erro ao guardar lembrança:", error);
     const estimate = await getStorageEstimate();
@@ -505,11 +795,32 @@ async function start() {
   appStarted = true;
   try {
     database = await openDatabase();
-    memories = await readMemories();
-    memories.sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999"));
+    const localMemories = await readMemories();
+    memories = localMemories;
+    if (cloudEnabled) {
+      try {
+        const cloudMemories = await readCloudMemories();
+        const byId = new Map(localMemories.map((memory) => [memory.id, memory]));
+        for (const memory of cloudMemories) byId.set(memory.id, memory);
+        memories = [...byId.values()];
+        document.querySelector("#public-sync-status").textContent = "Álbum online conectado: lembranças e fotos ficam disponíveis nos dispositivos.";
+        if (isEditor) syncStatus.textContent = "Álbum online conectado. Suas alterações serão compartilhadas.";
+      } catch (error) {
+        console.error("Erro ao carregar o álbum online:", error);
+        document.querySelector("#public-sync-status").textContent = `Não foi possível carregar o álbum online. ${error.message} As fotos incluídas no projeto continuam disponíveis.`;
+        if (isEditor) syncStatus.textContent = `Falha ao conectar com Supabase: ${error.message}`;
+      }
+    } else {
+      document.querySelector("#public-sync-status").textContent = "As fotos incluídas na pasta fotos aparecem para todos. Lembranças novas ficam neste navegador até configurar o Supabase.";
+    }
+    memories.push(...getBundledPhotoMemories());
+    sortMemories();
     renderBook();
   } catch (error) {
     console.error("Erro ao iniciar o livro:", error);
+    memories = getBundledPhotoMemories();
+    renderBook();
+    document.querySelector("#public-sync-status").textContent = `Não foi possível abrir o armazenamento local. ${error.message} As fotos do projeto continuam disponíveis.`;
     rightPage.innerHTML = `<div class="page-content centered">
       <p class="page-title">Não foi possível abrir o livro</p>
       <p class="empty-message">${escapeHtml(error.message || "Verifique o espaço e as permissões de armazenamento do navegador e atualize a página.")}</p>
@@ -523,21 +834,24 @@ loginForm.addEventListener("submit", (event) => {
   const data = new FormData(loginForm);
   const username = String(data.get("username")).trim();
   const password = String(data.get("password"));
-  if (username !== LOGIN_USER || password !== LOGIN_PASSWORD) {
-    loginError.textContent = "Login ou senha incorretos. Tente novamente.";
+  signInEditor(username, password).then(() => {
+    loginError.textContent = "";
+    isEditor = true;
+    if (!cloudEnabled) {
+      try {
+        sessionStorage.setItem(LOGIN_SESSION_KEY, "true");
+      } catch (error) {
+        console.warn("Não foi possível manter a sessão de edição:", error);
+      }
+    }
+    loginScreen.hidden = true;
+    updateEditorControls();
+    showToast("Modo de edição ativado.");
+  }).catch((error) => {
+    console.error("Falha ao autenticar o editor:", error);
+    loginError.textContent = error.message || "Não foi possível entrar no modo de edição.";
     document.querySelector("#login-password").focus();
-    return;
-  }
-  loginError.textContent = "";
-  isEditor = true;
-  try {
-    sessionStorage.setItem(LOGIN_SESSION_KEY, "true");
-  } catch (error) {
-    console.warn("Não foi possível manter a sessão de edição:", error);
-  }
-  loginScreen.hidden = true;
-  updateEditorControls();
-  showToast("Modo de edição ativado.");
+  });
 });
 
 updateEditorControls();

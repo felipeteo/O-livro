@@ -409,6 +409,7 @@ function renderMemory(memory, index) {
   const title = String(memory.title ?? "").trim();
   const caption = String(memory.caption ?? "").trim();
   const text = String(memory.text ?? "").trim();
+  const date = memory.date ? `<p class="page-date">${escapeHtml(formatDate(memory.date))}</p>` : "";
   const photo = memory.photo
     ? `<div class="memory-photo-wrap">
         <img class="memory-photo" src="${memory.photo}" alt="${escapeHtml(title)}">
@@ -418,10 +419,12 @@ function renderMemory(memory, index) {
 
   return `<div class="page-content">
     ${photo}
-    ${caption ? `<p class="image-caption">${escapeHtml(caption)}</p>` : ""}
-    <p class="page-date">${escapeHtml(formatDate(memory.date))}</p>
-    <h2 class="page-title">${escapeHtml(title)}</h2>
-    <p class="page-text">${escapeHtml(text)}</p>
+    <div class="memory-copy">
+      ${caption ? `<p class="image-caption">${escapeHtml(caption)}</p>` : ""}
+      ${date}
+      <h2 class="page-title">${escapeHtml(title)}</h2>
+      ${text ? `<p class="page-text">${escapeHtml(text)}</p>` : ""}
+    </div>
     <p class="page-number">${String(index + 1).padStart(2, "0")}</p>
   </div>`;
 }

@@ -329,7 +329,9 @@ h1 em { color: var(--rose); font-weight: 400; }
   font-size: 29px;
 }
 
+.memory-copy { flex: 0 0 auto; }
 .image-caption { flex: 0 0 auto; margin: -4px 0 8px; color: #806b61; font-family: "Playfair Display", Georgia, serif; font-size: clamp(12px, 1.25vw, 14px); font-style: italic; line-height: 1.4; text-align: center; }
+.memory-copy .page-date { margin-top: 8px; }
 .page-date { flex: 0 0 auto; margin: 0 0 7px; color: var(--rose); font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
 .page-title { flex: 0 0 auto; margin: 0 0 8px; font-size: clamp(19px, 2.5vw, 27px); line-height: 1.18; }
 .page-text { overflow: visible; flex: 0 0 auto; min-height: 0; margin: 0; color: #71665d; font-size: clamp(13px, 1.45vw, 16px); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }

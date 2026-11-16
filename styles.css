@@ -314,8 +314,8 @@ h1 em { color: var(--rose); font-weight: 400; }
   box-shadow: 0 3px 12px rgba(67,50,35,.15);
 }
 .memory-photo { display: block; width: 100%; height: 100%; max-height: 100%; object-fit: contain; }
-.remove-photo { position: absolute; right: 6px; bottom: 6px; padding: 6px 9px; border: 0; border-radius: 999px; color: white; background: rgba(87,54,49,.86); font-size: 10px; cursor: pointer; }
-.remove-photo:hover { background: #7f393b; }
+.remove-memory { position: absolute; right: 6px; bottom: 6px; padding: 6px 9px; border: 0; border-radius: 999px; color: white; background: rgba(87,54,49,.86); font-size: 10px; cursor: pointer; }
+.remove-memory:hover { background: #7f393b; }
 
 .photo-placeholder {
   display: grid;
@@ -366,6 +366,17 @@ h1 em { color: var(--rose); font-weight: 400; }
 .sync-tools[hidden] { display: none; }
 .sync-status { flex: 1 1 100%; margin: 0; color: #817569; font-size: 11px; line-height: 1.5; text-align: center; }
 .sync-tools .edit-button:disabled { opacity: .5; cursor: not-allowed; }
+.order-tools { width: min(620px, 100%); margin: 16px auto 0; color: #817569; font-size: 11px; }
+.order-tools[hidden] { display: none; }
+.order-tools summary { width: fit-content; margin: 0 auto; color: #71665d; cursor: pointer; font-weight: 600; }
+.order-tools > p { margin: 10px 0; line-height: 1.5; text-align: center; }
+.memory-order-list { display: grid; gap: 6px; max-height: 360px; margin: 0; padding: 0 6px 0 0; overflow-y: auto; list-style: none; }
+.memory-order-item { display: flex; align-items: center; gap: 10px; padding: 7px 9px; border: 1px solid #dfd3c7; border-radius: 10px; background: rgba(255,255,255,.55); }
+.memory-order-number { min-width: 24px; color: #a4998e; font-variant-numeric: tabular-nums; }
+.memory-order-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.memory-order-actions { display: flex; gap: 5px; }
+.memory-order-actions button { width: 30px; height: 30px; border: 1px solid #dfd3c7; border-radius: 50%; color: #71665d; background: white; cursor: pointer; }
+.memory-order-actions button:disabled { opacity: .4; cursor: default; }
 
 .memory-dialog {
   width: min(490px, calc(100% - 32px));
@@ -452,6 +463,7 @@ h1 em { color: var(--rose); font-weight: 400; }
   .storage-note { margin-top: 15px; }
   .sync-tools { gap: 7px; }
   .sync-status { font-size: 10px; }
+  .memory-order-list { max-height: 280px; }
 }
 
 @media (max-width: 380px) {

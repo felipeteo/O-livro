@@ -8,10 +8,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20261114-2">
-  <script src="supabase-config.js?v=20261114-2" defer></script>
-  <script src="photo-manifest.js?v=20261114-2" defer></script>
-  <script src="app.js?v=20261114-2" defer></script>
+  <link rel="stylesheet" href="styles.css?v=20261115-1">
+  <script src="supabase-config.js?v=20261115-1" defer></script>
+  <script src="photo-manifest.js?v=20261115-1" defer></script>
+  <script src="app.js?v=20261115-1" defer></script>
 </head>
 <body>
   <section class="login-screen" id="login-screen" aria-labelledby="login-title" hidden>
@@ -92,7 +92,13 @@
     <section class="sync-tools" id="sync-tools" hidden aria-label="Sincronização de lembranças">
       <p class="sync-status" id="sync-status" role="status">Conectando ao álbum online...</p>
       <button class="edit-button" id="import-local" type="button" disabled>Importar lembranças deste dispositivo</button>
+      <button class="edit-button" id="export-local" type="button">Baixar livro com alterações</button>
     </section>
+    <details class="order-tools" id="order-tools" hidden>
+      <summary>Organizar a ordem das lembranças</summary>
+      <p>Use as setas para mover cada lembrança. A ordem fica salva neste navegador e será incluída no arquivo baixado.</p>
+      <ol class="memory-order-list" id="memory-order-list"></ol>
+    </details>
   </main>
 
   <dialog class="memory-dialog" id="memory-dialog" aria-labelledby="dialog-title">

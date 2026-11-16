@@ -4,6 +4,7 @@ const DB_VERSION = 1;
 const COVER_INDEX = -1;
 const MAX_PHOTO_SIZE = 40 * 1024 * 1024;
 const MAX_PHOTO_DIMENSION = 1600;
+const MEMORY_ORDER_KEY = "nosso-livro-memory-order";
 const LOGIN_USER = "b+f";
 const LOGIN_PASSWORD = "2015";
 const LOGIN_SESSION_KEY = "nosso-livro-authenticated";
@@ -53,6 +54,9 @@ const toast = document.querySelector("#toast");
 const syncTools = document.querySelector("#sync-tools");
 const syncStatus = document.querySelector("#sync-status");
 const importLocalButton = document.querySelector("#import-local");
+const exportLocalButton = document.querySelector("#export-local");
+const orderTools = document.querySelector("#order-tools");
+const memoryOrderList = document.querySelector("#memory-order-list");
 
 let database;
 let memories = [];
@@ -124,6 +128,20 @@ function saveLocalMemory(memory) {
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error ?? new Error("Não foi possível guardar a lembrança."));
     transaction.onabort = () => reject(transaction.error ?? new Error("O armazenamento foi interrompido."));
+  });
+}
+
+function deleteLocalMemory(memoryId) {
+  return new Promise((resolve, reject) => {
+    if (!database) {
+      reject(new Error("O banco de dados não está disponível. Atualize a página para tentar novamente."));
+      return;
+    }
+    const transaction = database.transaction(STORE_NAME, "readwrite");
+    transaction.objectStore(STORE_NAME).delete(memoryId);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error ?? new Error("Não foi possível remover a lembrança."));
+    transaction.onabort = () => reject(transaction.error ?? new Error("A remoção da lembrança foi interrompida."));
   });
 }
 
@@ -236,6 +254,13 @@ async function deleteCloudPhoto(path) {
   });
 }
 
+async function deleteCloudMemory(memoryId) {
+  await supabaseRequest(`/rest/v1/memories?id=eq.${encodeURIComponent(memoryId)}`, {
+    method: "DELETE",
+    authenticated: true
+  });
+}
+
 async function saveMemory(memory) {
   let photoPath = memory.photo_path || null;
   let uploadedPath = "";
@@ -289,16 +314,28 @@ async function saveMemory(memory) {
   return savedMemory;
 }
 
-function getBundledPhotoMemories() {
-  return (window.BOOK_PHOTOS ?? []).map((photo, index) => ({
-    id: `project-photo-${index + 1}`,
-    title: photo.title,
-    date: "",
-    caption: "",
-    text: "",
-    photo: new URL(`fotos/${encodeURIComponent(photo.file)}`, document.baseURI).href,
-    bundled: true
-  }));
+function getBundledPhotoMemories(localOverrides = []) {
+  const overridesById = new Map(localOverrides.map((memory) => [memory.id, memory]));
+  return (window.BOOK_PHOTOS ?? []).map((photo) => {
+    const id = photo.id || `project-photo-${photo.file}`;
+    const bundledMemory = {
+      id,
+      title: photo.title,
+      date: photo.date ?? "",
+      caption: photo.caption ?? "",
+      text: photo.text ?? "",
+      file: photo.file,
+      photo: new URL(`fotos/${encodeURIComponent(photo.file)}`, document.baseURI).href,
+      bundled: true
+    };
+    return {
+      ...bundledMemory,
+      ...overridesById.get(id),
+      ...(photo.showPhoto === false ? { photo: "" } : {}),
+      file: photo.file,
+      bundled: true
+    };
+  }).filter((memory) => !memory.deleted && Boolean(memory.photo));
 }
 
 async function signInEditor(username, password) {
@@ -413,7 +450,7 @@ function renderMemory(memory, index) {
   const photo = memory.photo
     ? `<div class="memory-photo-wrap">
         <img class="memory-photo" src="${memory.photo}" alt="${escapeHtml(title)}">
-        ${isEditor && !memory.bundled ? `<button class="remove-photo" type="button" data-memory-id="${escapeHtml(memory.id)}" aria-label="Remover foto de ${escapeHtml(title)}">Remover foto</button>` : ""}
+    ${isEditor ? `<button class="remove-memory" type="button" data-memory-id="${escapeHtml(memory.id)}" aria-label="Remover lembrança ${escapeHtml(title)}">Remover lembrança</button>` : ""}
       </div>`
     : `<div class="photo-placeholder" aria-hidden="true">♡</div>`;
 
@@ -478,6 +515,7 @@ function renderBook() {
   }
   previousButton.disabled = isTurning || currentIndex === COVER_INDEX;
   nextButton.disabled = isTurning || isBackCover || (currentIndex !== COVER_INDEX && currentIndex >= memories.length);
+  renderMemoryOrder();
 }
 
 function updateEditorControls() {
@@ -498,34 +536,92 @@ function updateEditorControls() {
 function sortMemories() {
   memories.sort((a, b) => {
     if (Boolean(a.bundled) !== Boolean(b.bundled)) return a.bundled ? 1 : -1;
+    if (a.bundled) return 0;
     return (a.date || "9999").localeCompare(b.date || "9999");
   });
+  try {
+    const savedOrder = JSON.parse(localStorage.getItem(MEMORY_ORDER_KEY) || "[]");
+    if (!Array.isArray(savedOrder)) throw new Error("A ordem salva não é válida.");
+    const remaining = new Map(memories.map((memory) => [memory.id, memory]));
+    const orderedMemories = [];
+    for (const id of savedOrder) {
+      if (typeof id !== "string") continue;
+      const memory = remaining.get(id);
+      if (!memory) continue;
+      orderedMemories.push(memory);
+      remaining.delete(id);
+    }
+    memories = [...orderedMemories, ...remaining.values()];
+  } catch (error) {
+    console.warn("Não foi possível aplicar a ordem salva das lembranças:", error);
+  }
 }
 
-async function removePhoto(memoryId) {
-  const memory = memories.find((item) => item.id === memoryId);
-  if (!isEditor || memory?.bundled || !memory?.photo) return;
-  if (!window.confirm(`Remover a foto de "${memory.title}"? O texto da lembrança será mantido.`)) return;
+function renderMemoryOrder() {
+  orderTools.hidden = !isEditor;
+  if (!isEditor) return;
 
-  const oldPhotoPath = memory.photo_path;
-  const updatedMemory = { ...memory, photo: "", photo_path: null };
+  memoryOrderList.innerHTML = memories.map((memory, index) => {
+    const id = escapeHtml(String(memory.id));
+    const title = escapeHtml(String(memory.title ?? ""));
+    return `<li class="memory-order-item">
+      <span class="memory-order-number">${String(index + 1).padStart(2, "0")}</span>
+      <span class="memory-order-title">${title}</span>
+      <span class="memory-order-actions">
+        <button type="button" data-memory-id="${id}" data-direction="-1" aria-label="Mover ${title} para cima" ${index === 0 ? "disabled" : ""}>↑</button>
+        <button type="button" data-memory-id="${id}" data-direction="1" aria-label="Mover ${title} para baixo" ${index === memories.length - 1 ? "disabled" : ""}>↓</button>
+      </span>
+    </li>`;
+  }).join("");
+}
+
+async function removeMemory(memoryId) {
+  const memory = memories.find((item) => item.id === memoryId);
+  if (!isEditor || !memory) return;
+  if (!window.confirm(`Remover a lembrança "${memory.title}"? A foto e a página serão removidas do álbum.`)) return;
+
+  let cloudPhotoCleanupFailed = false;
   try {
-    await saveMemory(updatedMemory);
-    memories = memories.map((item) => item.id === memoryId ? updatedMemory : item);
-    if (oldPhotoPath && cloudEnabled) {
+    if (memory.bundled) {
+      await saveLocalMemory({ ...memory, photo: "", photo_path: null, deleted: true });
+    } else {
+      await deleteLocalMemory(memory.id);
+    }
+
+    if (!memory.bundled && cloudEnabled) {
       try {
-        await deleteCloudPhoto(oldPhotoPath);
+        await deleteCloudMemory(memory.id);
       } catch (error) {
-        console.error("A foto foi removida do livro, mas não do armazenamento:", error);
-        showToast("Foto removida do livro; não foi possível limpar o arquivo online.");
-        return;
+        try {
+          await saveLocalMemory(memory);
+        } catch (restoreError) {
+          console.error("Não foi possível restaurar a lembrança local após falha ao removê-la online:", restoreError);
+        }
+        throw error;
+      }
+      if (memory.photo_path) {
+        try {
+          await deleteCloudPhoto(memory.photo_path);
+        } catch (error) {
+          cloudPhotoCleanupFailed = true;
+          console.error("A lembrança foi removida, mas não foi possível limpar a foto online:", error);
+        }
       }
     }
+
+    memories = memories.filter((item) => item.id !== memoryId);
+    if (!memories.length) currentIndex = COVER_INDEX;
+    else if (currentIndex > memories.length) currentIndex = memories.length;
     renderBook();
-    showToast("Foto removida. O texto foi mantido.");
+    if (memory.bundled) {
+      syncStatus.textContent = "Lembrança removida neste navegador. Baixe o livro para incluir a alteração no projeto.";
+    }
+    showToast(cloudPhotoCleanupFailed
+      ? "Lembrança removida, mas não foi possível limpar a foto online."
+      : "Lembrança e página removidas do álbum.");
   } catch (error) {
-    console.error("Erro ao remover foto:", error);
-    showToast(error.message || "Não foi possível remover a foto.");
+    console.error("Erro ao remover lembrança:", error);
+    showToast(error.message || "Não foi possível remover a lembrança.");
   }
 }
 
@@ -627,8 +723,8 @@ book.addEventListener("error", (event) => {
   photoWrap.replaceWith(placeholder);
 }, true);
 rightPage.addEventListener("click", (event) => {
-  const removeButton = event.target.closest(".remove-photo");
-  if (removeButton) removePhoto(removeButton.dataset.memoryId);
+  const removeButton = event.target.closest(".remove-memory");
+  if (removeButton) removeMemory(removeButton.dataset.memoryId);
 });
 
 document.querySelector("#close-form").addEventListener("click", () => dialog.close());
@@ -650,6 +746,31 @@ document.querySelector("#logout").addEventListener("click", () => {
   }
   updateEditorControls();
   showToast("Modo de edição encerrado.");
+});
+
+memoryOrderList.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-memory-id]");
+  if (!button || !isEditor) return;
+
+  const fromIndex = memories.findIndex((memory) => memory.id === button.dataset.memoryId);
+  const toIndex = fromIndex + Number(button.dataset.direction);
+  if (fromIndex < 0 || toIndex < 0 || toIndex >= memories.length) return;
+
+  const currentMemory = memories[currentIndex];
+  const reorderedMemories = [...memories];
+  [reorderedMemories[fromIndex], reorderedMemories[toIndex]] = [reorderedMemories[toIndex], reorderedMemories[fromIndex]];
+  try {
+    localStorage.setItem(MEMORY_ORDER_KEY, JSON.stringify(reorderedMemories.map((memory) => memory.id)));
+  } catch (error) {
+    console.error("Não foi possível salvar a nova ordem das lembranças:", error);
+    syncStatus.textContent = `Não foi possível salvar a ordem neste navegador. ${error.message}`;
+    return;
+  }
+
+  memories = reorderedMemories;
+  if (currentMemory) currentIndex = memories.indexOf(currentMemory);
+  renderBook();
+  syncStatus.textContent = "Ordem atualizada e salva neste navegador. Baixe o livro para levar a ordem ao projeto.";
 });
 
 importLocalButton.addEventListener("click", async () => {
@@ -678,6 +799,50 @@ importLocalButton.addEventListener("click", async () => {
     syncStatus.textContent = `Importação interrompida. ${error.message} As lembranças locais foram mantidas; tente novamente.`;
   } finally {
     importLocalButton.disabled = !cloudEnabled;
+  }
+});
+
+exportLocalButton.addEventListener("click", async () => {
+  if (!isEditor) return;
+  exportLocalButton.disabled = true;
+  syncStatus.textContent = "Preparando o livro na ordem atual...";
+  try {
+    const localMemories = await readMemories();
+    const removedBundled = localMemories
+      .filter((memory) => memory.bundled && (memory.deleted || !memory.photo))
+      .map(({ id, title, file }) => ({ id, title, file }));
+    const exportMemories = memories.map(({ id, title, date, caption, text, photo, bundled, file }) => ({
+      id,
+      title,
+      date,
+      caption: caption ?? "",
+      text: text ?? "",
+      photo: photo ?? "",
+      bundled: Boolean(bundled),
+      file: file ?? "",
+      showPhoto: Boolean(photo)
+    }));
+
+    if (!exportMemories.length && !removedBundled.length) {
+      syncStatus.textContent = "Não há lembranças para exportar neste navegador.";
+      return;
+    }
+
+    const file = new Blob([JSON.stringify({ version: 3, memories: exportMemories, removedBundled }, null, 2)], {
+      type: "application/json"
+    });
+    const downloadUrl = URL.createObjectURL(file);
+    const downloadLink = document.createElement("a");
+    downloadLink.href = downloadUrl;
+    downloadLink.download = "lembrancas-locais.json";
+    downloadLink.click();
+    window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+    syncStatus.textContent = `${exportMemories.length} lembrança(s) exportada(s) na ordem atual e ${removedBundled.length} remoção(ões) de fotos do projeto.`;
+  } catch (error) {
+    console.error("Erro ao exportar as lembranças locais:", error);
+    syncStatus.textContent = `Não foi possível exportar as lembranças. ${error.message}`;
+  } finally {
+    exportLocalButton.disabled = false;
   }
 });
 
@@ -759,7 +924,7 @@ form.addEventListener("submit", async (event) => {
   try {
     const savedMemory = await saveMemory(memory);
     memories.push(savedMemory);
-    memories.sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999"));
+    sortMemories();
     currentIndex = memories.indexOf(savedMemory);
     renderBook();
     dialog.close();
@@ -799,12 +964,20 @@ async function start() {
   try {
     database = await openDatabase();
     const localMemories = await readMemories();
-    memories = localMemories;
+    const localBundledOverrides = localMemories.filter((memory) => memory.bundled);
+    const bundledMemories = getBundledPhotoMemories(localBundledOverrides);
+    const bundledIds = new Set([
+      ...localBundledOverrides.map((memory) => memory.id),
+      ...bundledMemories.map((memory) => memory.id)
+    ]);
+    memories = localMemories.filter((memory) => !memory.bundled && !bundledIds.has(memory.id));
     if (cloudEnabled) {
       try {
         const cloudMemories = await readCloudMemories();
-        const byId = new Map(localMemories.map((memory) => [memory.id, memory]));
-        for (const memory of cloudMemories) byId.set(memory.id, memory);
+        const byId = new Map(memories.map((memory) => [memory.id, memory]));
+        for (const memory of cloudMemories) {
+          if (!bundledIds.has(memory.id)) byId.set(memory.id, memory);
+        }
         memories = [...byId.values()];
         document.querySelector("#public-sync-status").textContent = "Álbum online conectado: lembranças e fotos ficam disponíveis nos dispositivos.";
         if (isEditor) syncStatus.textContent = "Álbum online conectado. Suas alterações serão compartilhadas.";
@@ -816,7 +989,7 @@ async function start() {
     } else {
       document.querySelector("#public-sync-status").textContent = "As fotos incluídas na pasta fotos aparecem para todos. Lembranças novas ficam neste navegador até configurar o Supabase.";
     }
-    memories.push(...getBundledPhotoMemories());
+    memories.push(...bundledMemories);
     sortMemories();
     renderBook();
   } catch (error) {
